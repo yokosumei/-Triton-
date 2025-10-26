@@ -1,29 +1,40 @@
 <!doctype html>
 <html>
 <head>
-  <meta charset="utf-8" />
-  <title>Triton — Pose Test</title>
-  <link rel="stylesheet" href="/Triton_pose/static/styles/style.test.css" />
+  <meta charset="utf-8"/>
+  <title>Triton — Pose+XGB v2 (minimal)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link rel="preconnect" href="https://cdn.socket.io">
+  <link rel="stylesheet" href="/static/styles/style.test.css"/>
+  <script defer src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script defer src="/static/scripts/main.test.js"></script>
 </head>
 <body>
   <header>
-    <h1>Triton — Pose Test (YOLO Pose + XGB)</h1>
+    <h1>Triton — Pose + XGBoost</h1>
     <div class="controls">
       <button id="btn-start">Start</button>
       <button id="btn-stop">Stop</button>
       <span id="status">stopped</span>
     </div>
   </header>
+
   <main>
-    <section class="video">
-      <img id="stream" src="/video_feed" alt="video stream"/>
+    <section class="streams">
+      <div class="card">
+        <div class="cardh">RAW</div>
+        <img id="raw" src="/video_feed" alt="raw" loading="eager" decoding="async"/>
+      </div>
+      <div class="card">
+        <div class="cardh">POSE</div>
+        <img id="pose" src="/pose_feed" alt="pose" loading="eager" decoding="async"/>
+      </div>
     </section>
-    <section class="info">
-      <div>Label: <span id="label">N/A</span></div>
-      <div>Proba: <span id="proba">0.00</span></div>
+
+    <section class="readouts">
+      <div>Label: <b id="label">N/A</b></div>
+      <div>Proba: <b id="proba">0.000</b></div>
     </section>
   </main>
-  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-  <script src="/Triton_pose/static/scripts/main.test.js"></script>
 </body>
 </html>
