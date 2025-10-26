@@ -1,0 +1,16 @@
+# Web backend
+flask==2.3.3
+flask-socketio==5.3.6
+eventlet==0.33.3
+
+# AI & Machine Learning
+torch==2.2.0
+ultralytics==8.1.0
+opencv-python==4.9.0.80
+joblib==1.4.0
+numpy==1.26.4
+scikit-learn==1.4.2
+pandas==2.2.2
+
+# Raspberry Pi camera (opțional, activezi doar pe Pi)
+# picamera2 @ git+https://github.com/raspberrypi/picamera2.git
