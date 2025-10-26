@@ -1,0 +1,6 @@
+body { font-family: system-ui, sans-serif; margin:0; background:#0f1216; color:#e8eaf0; }
+header { display:flex; justify-content:space-between; align-items:center; padding:12px 16px; background:#161b22; }
+.controls button { margin-right:8px; }
+main { display:flex; gap:16px; padding:16px; }
+.video img { width:640px; height:480px; object-fit:cover; background:#000; border:1px solid #222; }
+.info { min-width:200px; background:#161b22; padding:12px; border:1px solid #222; border-radius:8px; }
