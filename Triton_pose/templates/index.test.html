@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Triton — Pose Test</title>
+  <link rel="stylesheet" href="/Triton_pose/static/styles/style.test.css" />
+</head>
+<body>
+  <header>
+    <h1>Triton — Pose Test (YOLO Pose + XGB)</h1>
+    <div class="controls">
+      <button id="btn-start">Start</button>
+      <button id="btn-stop">Stop</button>
+      <span id="status">stopped</span>
+    </div>
+  </header>
+  <main>
+    <section class="video">
+      <img id="stream" src="/video_feed" alt="video stream"/>
+    </section>
+    <section class="info">
+      <div>Label: <span id="label">N/A</span></div>
+      <div>Proba: <span id="proba">0.00</span></div>
+    </section>
+  </main>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script src="/Triton_pose/static/scripts/main.test.js"></script>
+</body>
+</html>
