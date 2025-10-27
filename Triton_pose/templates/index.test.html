@@ -6,43 +6,34 @@
   <meta name="viewport" content="width=1280, initial-scale=0.8">
   <style>
     :root { color-scheme: dark; }
-    body{background:#0e0e0f;color:#eee;font-family:system-ui,Segoe UI,Arial,sans-serif;margin:0}
-    header{padding:10px 14px;background:#151517;border-bottom:1px solid #2a2a2e}
-    h1{margin:0;font-size:18px}
+    /* Stil clasic, compact, fără margini rotunde */
+    body{margin:0;background:#111;color:#e6e6e6;font:14px/1.35 system-ui,Segoe UI,Arial,sans-serif}
+    header{padding:8px 10px;background:#171717;border-bottom:1px solid #2a2a2a}
+    h1{margin:0;font-size:16px;font-weight:600}
 
-    /* GRID cu două streamuri */
-    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px}
-    .pane{background:#121216;border:1px solid #2a2a2e; /* square */ border-radius:0}
-    .pane h3{margin:0;padding:8px 10px;border-bottom:1px solid #2a2a2e;background:#16161b; /* square */ border-radius:0}
-    .pane img{width:100%;height:520px;object-fit:contain;background:#000}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:8px}
+    .pane{border:1px solid #2a2a2a;background:#141414}
+    .pane h3{margin:0;padding:6px 8px;border-bottom:1px solid #2a2a2a;background:#181818;font-size:13px;font-weight:600}
+    .pane img{width:100%;height:520px;object-fit:contain;background:#000;display:block}
 
-    /* CONTROALE sub streamuri (square) */
-    .controls{
-      display:flex;flex-wrap:wrap;gap:10px;align-items:center;
-      padding:12px;border-top:1px solid #202024;border-bottom:1px solid #202024; margin:0 12px;
-    }
-    button{
-      padding:8px 14px;border:1px solid #2a2a2e;border-radius:0; /* square */
-      background:#2a6cff;color:#fff;cursor:pointer;font-weight:600
-    }
-    button.secondary{background:#3a3a44}
-    button:disabled{opacity:.6;cursor:not-allowed}
+    .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;
+              padding:8px;border-top:1px solid #2a2a2a;border-bottom:1px solid #2a2a2a;margin:0 8px}
+    button{padding:6px 12px;border:1px solid #3a3a3a;background:#2f6bff;color:#fff;
+           font-weight:600;cursor:pointer;border-radius:0}
+    button.secondary{background:#3a3a3a}
+    button:disabled{opacity:0.65;cursor:not-allowed}
+    .status{margin-left:6px;opacity:.9}
 
-    .status{margin-left:8px;opacity:.9}
-
-    /* READOUT sub butoane (square badges) */
-    .readout{
-      display:flex;flex-wrap:wrap;gap:10px;align-items:center;
-      padding:12px;border-top:1px solid #202024;margin:0 12px 12px;
-    }
-    .badge{
-      display:inline-block;padding:6px 10px;border-radius:0; /* square */
-      background:#1b1b22;border:1px solid #2a2a2e
-    }
-    .ok{color:#8ef0a3} .warn{color:#ffd479}
+    .readout{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px;margin:0 8px}
+    .badge{display:inline-block;padding:4px 8px;border:1px solid #2a2a2a;background:#1a1a1a;border-radius:0}
+    .ok{color:#97e69f}
+    .warn{color:#ffd479}
     .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
 
-    @media (max-width:1200px){ .grid{grid-template-columns:1fr} .pane img{height:360px} }
+    @media (max-width:1200px){
+      .grid{grid-template-columns:1fr}
+      .pane img{height:360px}
+    }
   </style>
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 </head>
@@ -61,16 +52,16 @@
     </div>
   </div>
 
-  <!-- BUTOANELE sub streamuri -->
+  <!-- BUTOANE + STATUS sub streamuri -->
   <div class="controls">
     <button id="startBtn">Start analiza</button>
-    <button id="stopBtn"  class="secondary">Stop</button>
+    <button id="stopBtn" class="secondary">Stop</button>
     <span class="status mono" id="statusText">status: idle</span>
     <span class="badge mono" id="queueInfo">queues: kp=0 norm=0 feat=0</span>
     <span class="badge mono" id="modelInfo">label=N/A p=0.000</span>
   </div>
 
-  <!-- DEBUG readout -->
+  <!-- DEBUG -->
   <div class="readout mono" id="debug">
     <span id="sock" class="badge">socket: …</span>
     <span id="thr"  class="badge">τ_on/τ_off/cooldown: …</span>
@@ -126,9 +117,9 @@
     }
     pollDebug();
 
-    // Hard-refresh trick pentru IMG-uri dacă pornești/oprești des
-    function bust(imgId, path){
-      const el = document.getElementById(imgId);
+    // Forțează reatașarea feed-urilor după Start/Stop
+    function bust(id, path){
+      const el = document.getElementById(id);
       el.src = path + '?ts=' + Date.now();
     }
     startBtn.addEventListener('click', ()=>{ bust('raw','/video_feed'); bust('pose','/pose_feed'); });
