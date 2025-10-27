@@ -1,13 +1,13 @@
 #!/usr/bin/env python
-# Triton_pose / pose_test.py — YOLO Pose + XGB (runtime v2, complet, cu DEBUG)
+# Triton_pose / pose_test.py — YOLO Pose + XGB (runtime v2 complet, cu DEBUG/UI minimal)
 # - 4 fire + cozi (PoseEstimator -> Normalizer -> FeatureExtractor -> Classifier)
 # - Fereastra temporizată 4s, HOP=0.5s
 # - Filtru calitate frame pentru decizie (≥50% kp cu conf≥0.5 — relaxat pentru demo)
 # - Normalizare T/S: pelvis center + shoulder-distance scale
 # - Features v2 identice cu make_features_v2.py
 # - Pipeline XGB (Imputer+Scaler+XGB) + calibrare Platt (opțional)
-# - Histerezis (tau_on/tau_off) + cooldown
-# - UI minimal: / (Start/Stop), /video_feed (RAW), /pose_feed (overlay), SocketIO "decision"
+# - Histerezis (tau_on/tau_off) + cooldown (din threshold.json sau defaults)
+# - UI minimal: / (Start/Stop), /video_feed, /pose_feed, SocketIO "decision"
 # - DEBUG: /selftest (testează XGB), /debug (stare runtime), loguri în toate firele
 
 import os, json, time, threading, queue
@@ -49,18 +49,23 @@ DEFAULT_TAU_ON   = 0.60
 DEFAULT_TAU_OFF  = 0.55
 DEFAULT_COOLDOWN = 7.0
 
-# ===================== Models (path static to repo root) =====
-BASE_DIR    = Path(__file__).resolve().parent.parent     # repo root
+# ===================== Paths (independente de CWD) ===========
+BASE_DIR    = Path(__file__).resolve().parent.parent     # repo root (~/Triton)
+APP_DIR     = Path(__file__).resolve().parent            # Triton_pose/
 MODELS_DIR  = BASE_DIR / "models"
 
-POSE_WEIGHTS    = str(MODELS_DIR / "yolo11n-pose.pt")    # YOLOv11 Pose (sau schimbă în yolov8n-pose.pt)
+POSE_WEIGHTS    = str(MODELS_DIR / "yolo11n-pose.pt")    # sau pune yolov8n-pose.pt dacă folosești YOLOv8
 XGB_PIPELINE    = str(MODELS_DIR / "xgb_pipeline.joblib")
 THRESHOLDS_JSON = str(MODELS_DIR / "threshold.json")
 FEATURE_SCHEMA  = str(MODELS_DIR / "features_schema.json")
 CALIBRATOR_PATH = str(MODELS_DIR / "calibrator.joblib")  # opțional
 
 # ===================== App/State =============================
-app = Flask(__name__, template_folder=str(BASE_DIR / "templates"), static_folder=str(BASE_DIR / "static"))
+app = Flask(
+    __name__,
+    template_folder=str(APP_DIR / "templates"),   # <<— UI minimal de test e aici
+    static_folder=str(BASE_DIR / "static")
+)
 socketio = SocketIO(app, async_mode="threading")
 
 raw_lock   = threading.Lock()
@@ -95,8 +100,7 @@ try:
             tau_off = float(th.get("tau_off", max(0.5, tau_on - 0.05)))
             cooldown_s = float(th.get("cooldown_s", DEFAULT_COOLDOWN))
         elif "threshold" in th:
-            # prag din OOF/Platt
-            tau_on = float(th["threshold"])
+            tau_on = float(th["threshold"])  # din OOF/Platt
             tau_off = max(0.5, tau_on - 0.05)
             cooldown_s = DEFAULT_COOLDOWN
 except Exception as e:
@@ -122,12 +126,24 @@ except Exception:
 pose_model = YOLO(POSE_WEIGHTS); log("YOLO loaded:", POSE_WEIGHTS)
 XGB        = joblib.load(XGB_PIPELINE); log("XGB loaded:", XGB_PIPELINE)
 log(f"thresholds: tau_on={tau_on:.3f} tau_off={tau_off:.3f} cooldown={cooldown_s:.1f}s")
+
+# ===== Feature schema tolerantă (acceptă `columns` sau `feature_names`)
+FEATURE_LIST = None
 try:
     with open(FEATURE_SCHEMA, "r", encoding="utf-8") as f:
         _schema = json.load(f)
-    log("feature_schema OK, features:", len(_schema.get("feature_names", [])))
+    feats = _schema.get("feature_names")
+    if feats is None:
+        cols = _schema.get("columns", [])
+        drop = {"video_id", "t_start", "t_end", "label"}
+        feats = [c for c in cols if c not in drop]
+    if not feats:
+        raise ValueError("no feature names in schema")
+    FEATURE_LIST = list(feats)
+    log("feature_schema OK, features:", len(FEATURE_LIST))
 except Exception as e:
     log("feature_schema missing/unreadable:", e)
+    FEATURE_LIST = None
 
 # ===== Keypoints idx
 NOSE=0; L_EYE=1; R_EYE=2; L_EAR=3; R_EAR=4
@@ -435,14 +451,7 @@ def feature_extractor_thread():
 def classifier_thread():
     global last_label, last_proba, cooldown_until, consec_on, consec_off
 
-    feature_order = None
-    try:
-        if os.path.exists(FEATURE_SCHEMA):
-            with open(FEATURE_SCHEMA, "r", encoding="utf-8") as f:
-                js = json.load(f)
-            feature_order = list(js.get("feature_names", [])) or None
-    except Exception:
-        feature_order = None
+    feature_order = FEATURE_LIST
     if feature_order is None and hasattr(XGB, "feature_names_in_"):
         feature_order = list(XGB.feature_names_in_)
 
@@ -552,13 +561,9 @@ def pose_feed():
 
 @app.route("/selftest")
 def selftest():
-    cols = None
-    try:
-        with open(FEATURE_SCHEMA, "r", encoding="utf-8") as f:
-            cols = json.load(f).get("feature_names", [])
-    except Exception:
-        if hasattr(XGB, "feature_names_in_"):
-            cols = list(XGB.feature_names_in_)
+    cols = FEATURE_LIST
+    if not cols and hasattr(XGB, "feature_names_in_"):
+        cols = list(XGB.feature_names_in_)
     if not cols:
         return jsonify({"ok": False, "err": "no feature schema"}), 500
     row = {c: np.nan for c in cols}
