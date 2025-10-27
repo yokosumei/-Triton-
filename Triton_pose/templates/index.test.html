@@ -1,40 +1,117 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <title>Triton — Pose+XGB v2 (minimal)</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <link rel="preconnect" href="https://cdn.socket.io">
-  <link rel="stylesheet" href="/static/styles/style.test.css"/>
-  <script defer src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-  <script defer src="/static/scripts/main.test.js"></script>
+  <meta charset="utf-8">
+  <title>Triton Pose Test</title>
+  <meta name="viewport" content="width=1280, initial-scale=0.8">
+  <style>
+    :root { color-scheme: dark; }
+    body{background:#0e0e0f;color:#eee;font-family:system-ui,Segoe UI,Arial,sans-serif;margin:0}
+    header{padding:10px 14px;background:#151517;border-bottom:1px solid #2a2a2e}
+    h1{margin:0;font-size:18px}
+    .controls{display:flex;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid #202024;flex-wrap:wrap}
+    button{padding:8px 14px;border:0;border-radius:10px;background:#2a6cff;color:#fff;cursor:pointer;font-weight:600}
+    button.secondary{background:#3a3a44}
+    button:disabled{opacity:.6;cursor:not-allowed}
+    .status{margin-left:8px;opacity:.9}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px}
+    .pane{background:#121216;border:1px solid #202024;border-radius:12px;overflow:hidden}
+    .pane h3{margin:0;padding:8px 10px;border-bottom:1px solid #202024;background:#16161b}
+    .pane img{width:100%;height:520px;object-fit:contain;background:#000}
+    .readout{display:flex;gap:16px;align-items:center;padding:10px 14px;border-top:1px solid #202024}
+    .badge{display:inline-block;padding:3px 8px;border-radius:999px;background:#1b1b22;border:1px solid #2a2a2e}
+    .ok{color:#8ef0a3} .warn{color:#ffd479}
+    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
+    @media (max-width:1200px){ .grid{grid-template-columns:1fr} .pane img{height:360px} }
+  </style>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 </head>
 <body>
-  <header>
-    <h1>Triton — Pose + XGBoost</h1>
-    <div class="controls">
-      <button id="btn-start">Start</button>
-      <button id="btn-stop">Stop</button>
-      <span id="status">stopped</span>
+  <header><h1>Triton — Pose + XGB (demo)</h1></header>
+
+  <div class="controls">
+    <button id="startBtn">Start analiza</button>
+    <button id="stopBtn"  class="secondary">Stop</button>
+    <span class="status mono" id="statusText">status: idle</span>
+    <span class="badge mono" id="queueInfo">queues: kp=0 norm=0 feat=0</span>
+    <span class="badge mono" id="modelInfo">label=N/A p=0.000</span>
+  </div>
+
+  <div class="grid">
+    <div class="pane">
+      <h3>RAW</h3>
+      <img id="raw" src="/video_feed" alt="raw stream">
     </div>
-  </header>
+    <div class="pane">
+      <h3>POSE (schelet + scor)</h3>
+      <img id="pose" src="/pose_feed" alt="pose stream">
+    </div>
+  </div>
 
-  <main>
-    <section class="streams">
-      <div class="card">
-        <div class="cardh">RAW</div>
-        <img id="raw" src="/video_feed" alt="raw" loading="eager" decoding="async"/>
-      </div>
-      <div class="card">
-        <div class="cardh">POSE</div>
-        <img id="pose" src="/pose_feed" alt="pose" loading="eager" decoding="async"/>
-      </div>
-    </section>
+  <div class="readout mono" id="debug">
+    <span id="sock" class="badge">socket: …</span>
+    <span id="thr"  class="badge">τ_on/τ_off/cooldown: …</span>
+    <span id="running" class="badge">running: false</span>
+  </div>
 
-    <section class="readouts">
-      <div>Label: <b id="label">N/A</b></div>
-      <div>Proba: <b id="proba">0.000</b></div>
-    </section>
-  </main>
+  <script>
+  (function(){
+    const $ = s => document.querySelector(s);
+    const startBtn = $('#startBtn');
+    const stopBtn  = $('#stopBtn');
+    const statusEl = $('#statusText');
+    const queueEl  = $('#queueInfo');
+    const modelEl  = $('#modelInfo');
+    const sockEl   = $('#sock');
+    const thrEl    = $('#thr');
+    const runEl    = $('#running');
+
+    function setStatus(t){ statusEl.textContent = 'status: ' + t; }
+    function setQueues(kp,norm,feat){ queueEl.textContent = `queues: kp=${kp} norm=${norm} feat=${feat}`; }
+    function setModel(label,p){ modelEl.textContent = `label=${label} p=${p.toFixed(3)}`; modelEl.className = 'badge mono ' + (label==='INEC'?'warn':'ok'); }
+    function setRunning(b){ runEl.textContent = 'running: ' + b; }
+
+    // Start/Stop
+    startBtn.onclick = async ()=>{ try{ await fetch('/start',{method:'POST'}); setStatus('running'); setRunning(true);}catch(e){ setStatus('err start'); } };
+    stopBtn.onclick  = async ()=>{ try{ await fetch('/stop' ,{method:'POST'}); setStatus('stopped'); setRunning(false);}catch(e){ setStatus('err stop'); } };
+
+    // SocketIO
+    const ioUrl = location.protocol + '//' + location.host;
+    const sock = io(ioUrl);
+    sock.on('connect', ()=>{ sockEl.textContent = 'socket: connected'; });
+    sock.on('disconnect', ()=>{ sockEl.textContent = 'socket: disconnected'; });
+    sock.on('decision', (d)=>{
+      const label = d?.label ?? 'N/A';
+      const p     = +((d?.proba ?? 0));
+      setModel(label, p);
+    });
+
+    // Debug poll
+    async function pollDebug(){
+      try{
+        const r = await fetch('/debug');
+        if(!r.ok) throw 0;
+        const j = await r.json();
+        setQueues(j.queues.kp, j.queues.norm, j.queues.feat);
+        setRunning(!!j.running);
+        thrEl.textContent = `τ_on/τ_off/cooldown: ${j.tau_on.toFixed(3)}/${j.tau_off.toFixed(3)}/${j.cooldown_s.toFixed(1)}s`;
+      }catch(e){
+        // ignore
+      }finally{
+        setTimeout(pollDebug, 1500);
+      }
+    }
+    pollDebug();
+
+    // Hard-refresh trick pentru IMG-uri daca apesi de multe ori Start/Stop
+    function bust(imgId, path){
+      const el = document.getElementById(imgId);
+      el.src = path + '?ts=' + Date.now();
+    }
+    // Reatașăm feedurile când pornești/opriți
+    startBtn.addEventListener('click', ()=>{ bust('raw','/video_feed'); bust('pose','/pose_feed'); });
+    stopBtn .addEventListener('click', ()=>{ bust('raw','/video_feed'); bust('pose','/pose_feed'); });
+  })();
+  </script>
 </body>
 </html>
