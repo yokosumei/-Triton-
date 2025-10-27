@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Triton_pose / pose_test.py — YOLO Pose + XGB (runtime v2 complet, UI inline)
+# Triton_pose / pose_test.py — YOLO Pose + XGB (runtime v2 complet, UI din templates/index.test.html)
 # - 4 fire + cozi: PoseEstimator -> Normalizer -> FeatureExtractor -> Classifier
 # - Fereastra temporizată 4s, HOP=0.5s (ca la training v2)
 # - Overlay schelet pe feedul POSE (indiferent de filtru), decizia doar dacă trece filtrul
@@ -7,7 +7,7 @@
 # - Features v2 (viteze încheieturi, % mâini sus, etc.)
 # - Pipeline XGB (Imputer+Scaler+XGB) + (opțional) calibrator .joblib
 # - Histerezis (tau_on/tau_off) + cooldown
-# - UI inline (nu cere templates/static), plus /debug și /selftest
+# - UI prin templates/index.test.html (fără static pentru demo)
 
 import os, json, time, threading, queue
 from collections import deque
@@ -18,7 +18,7 @@ import cv2
 import numpy as np
 import pandas as pd
 import joblib
-from flask import Flask, Response, jsonify
+from flask import Flask, Response, jsonify, render_template
 from flask_socketio import SocketIO
 
 # ========= Config =========
@@ -58,8 +58,8 @@ FEATURE_SCHEMA  = str(MODELS_DIR / "features_schema.json")
 CALIBRATOR_PATH = str(MODELS_DIR / "calibrator.joblib")  # opțional
 
 # ========= App/State =========
-# UI inline: nu folosim template/static, deci punem default-uri
-app = Flask(__name__)
+# Acum folosim template_folder explicit către Triton_pose/templates
+app = Flask(__name__, template_folder=str(APP_DIR / "templates"))
 socketio = SocketIO(app, async_mode="threading")
 
 raw_lock   = threading.Lock()
@@ -507,103 +507,11 @@ def classifier_thread():
         socketio.emit("decision", {"label": last_label, "proba": round(last_proba,3)})
         log(f"feat->cls   p={proba:.3f}  label={last_label}  on={consec_on} off={consec_off}")
 
-# ========= Routes (UI inline + endpoints) =========
+# ========= Routes (UI din template + endpoints) =========
 @app.route("/")
 def index():
-    # Inline UI (fără dependențe externe în afara Socket.IO CDN)
-    html = f"""<!DOCTYPE html>
-<html lang="en"><head>
-<meta charset="utf-8">
-<title>Triton Pose Test</title>
-<meta name="viewport" content="width=1280, initial-scale=0.8">
-<style>
-:root {{ color-scheme: dark; }}
-body{{background:#0e0e0f;color:#eee;font-family:system-ui,Segoe UI,Arial,sans-serif;margin:0}}
-header{{padding:10px 14px;background:#151517;border-bottom:1px solid #2a2a2e}}
-h1{{margin:0;font-size:18px}}
-.controls{{display:flex;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid #202024;flex-wrap:wrap}}
-button{{padding:8px 14px;border:0;border-radius:10px;background:#2a6cff;color:#fff;cursor:pointer;font-weight:600}}
-button.secondary{{background:#3a3a44}}
-button:disabled{{opacity:.6;cursor:not-allowed}}
-.status{{margin-left:8px;opacity:.9}}
-.grid{{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px}}
-.pane{{background:#121216;border:1px solid #202024;border-radius:12px;overflow:hidden}}
-.pane h3{{margin:0;padding:8px 10px;border-bottom:1px solid #202024;background:#16161b}}
-.pane img{{width:100%;height:520px;object-fit:contain;background:#000}}
-.readout{{display:flex;gap:16px;align-items:center;padding:10px 14px;border-top:1px solid #202024}}
-.badge{{display:inline-block;padding:3px 8px;border-radius:999px;background:#1b1b22;border:1px solid #2a2a2e}}
-.ok{{color:#8ef0a3}} .warn{{color:#ffd479}}
-.mono{{font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}}
-@media (max-width:1200px){{ .grid{{grid-template-columns:1fr}} .pane img{{height:360px}} }}
-</style>
-<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-</head>
-<body>
-<header><h1>Triton — Pose + XGB (demo)</h1></header>
-<div class="controls">
-  <button id="startBtn">Start analiza</button>
-  <button id="stopBtn" class="secondary">Stop</button>
-  <span class="status mono" id="statusText">status: idle</span>
-  <span class="badge mono" id="queueInfo">queues: kp=0 norm=0 feat=0</span>
-  <span class="badge mono" id="modelInfo">label=N/A p=0.000</span>
-</div>
-<div class="grid">
-  <div class="pane">
-    <h3>RAW</h3>
-    <img id="raw" src="/video_feed" alt="raw stream">
-  </div>
-  <div class="pane">
-    <h3>POSE (schelet + scor)</h3>
-    <img id="pose" src="/pose_feed" alt="pose stream">
-  </div>
-</div>
-<div class="readout mono" id="debug">
-  <span id="sock" class="badge">socket: …</span>
-  <span id="thr"  class="badge">τ_on/τ_off/cooldown: …</span>
-  <span id="running" class="badge">running: false</span>
-</div>
-<script>
-(function(){{
-  const $ = s => document.querySelector(s);
-  const startBtn = $('#startBtn'), stopBtn=$('#stopBtn');
-  const statusEl = $('#statusText'), queueEl=$('#queueInfo'), modelEl=$('#modelInfo');
-  const sockEl = $('#sock'), thrEl=$('#thr'), runEl=$('#running');
-
-  function setStatus(t){{ statusEl.textContent = 'status: ' + t; }}
-  function setQueues(kp,norm,feat){{ queueEl.textContent = `queues: kp=${{kp}} norm=${{norm}} feat=${{feat}}`; }}
-  function setModel(label,p){{ modelEl.textContent = `label=${{label}} p=${{p.toFixed(3)}}`; modelEl.className='badge mono ' + (label==='INEC'?'warn':'ok'); }}
-  function setRunning(b){{ runEl.textContent = 'running: ' + b; }}
-
-  startBtn.onclick = async ()=>{{ try{{ await fetch('/start',{{method:'POST'}}); setStatus('running'); setRunning(true); }}catch(e){{ setStatus('err start'); }} }};
-  stopBtn.onclick  = async ()=>{{ try{{ await fetch('/stop', {{method:'POST'}}); setStatus('stopped'); setRunning(false); }}catch(e){{ setStatus('err stop'); }} }};
-
-  const sock = io(location.protocol + '//' + location.host);
-  sock.on('connect', ()=>{{ sockEl.textContent='socket: connected'; }});
-  sock.on('disconnect', ()=>{{ sockEl.textContent='socket: disconnected'; }});
-  sock.on('decision', d=>{{ const label=d?.label??'N/A'; const p=+(d?.proba??0); setModel(label,p); }});
-
-  async function pollDebug(){{
-    try{{
-      const r = await fetch('/debug'); if(!r.ok) throw 0;
-      const j = await r.json();
-      setQueues(j.queues.kp, j.queues.norm, j.queues.feat);
-      setRunning(!!j.running);
-      thrEl.textContent = `τ_on/τ_off/cooldown: ${{j.tau_on.toFixed(3)}}/${{j.tau_off.toFixed(3)}}/${{j.cooldown_s.toFixed(1)}}s`;
-    }}catch(_){{
-    }}finally{{
-      setTimeout(pollDebug, 1500);
-    }}
-  }}
-  pollDebug();
-
-  function bust(id, path){{ const el=document.getElementById(id); el.src = path + '?ts=' + Date.now(); }}
-  startBtn.addEventListener('click', ()=>{{ bust('raw','/video_feed'); bust('pose','/pose_feed'); }});
-  stopBtn .addEventListener('click', ()=>{{ bust('raw','/video_feed'); bust('pose','/pose_feed'); }});
-}})();
-</script>
-</body></html>
-"""
-    return html
+    # Folosește Triton_pose/templates/index.test.html (CSS+JS inline în fișier)
+    return render_template("index.test.html")
 
 @app.route("/start", methods=["POST"])
 def start():
