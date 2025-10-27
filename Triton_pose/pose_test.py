@@ -1,14 +1,13 @@
 #!/usr/bin/env python
-# Triton_pose / pose_test.py — YOLO Pose + XGB (runtime v2 complet, cu DEBUG/UI minimal)
-# - 4 fire + cozi (PoseEstimator -> Normalizer -> FeatureExtractor -> Classifier)
-# - Fereastra temporizată 4s, HOP=0.5s
-# - Filtru calitate frame pentru decizie (≥50% kp cu conf≥0.5 — relaxat pentru demo)
-# - Normalizare T/S: pelvis center + shoulder-distance scale
-# - Features v2 identice cu make_features_v2.py
-# - Pipeline XGB (Imputer+Scaler+XGB) + calibrare Platt (opțional)
-# - Histerezis (tau_on/tau_off) + cooldown (din threshold.json sau defaults)
-# - UI minimal: / (Start/Stop), /video_feed, /pose_feed, SocketIO "decision"
-# - DEBUG: /selftest (testează XGB), /debug (stare runtime), loguri în toate firele
+# Triton_pose / pose_test.py — YOLO Pose + XGB (runtime v2 complet, UI inline)
+# - 4 fire + cozi: PoseEstimator -> Normalizer -> FeatureExtractor -> Classifier
+# - Fereastra temporizată 4s, HOP=0.5s (ca la training v2)
+# - Overlay schelet pe feedul POSE (indiferent de filtru), decizia doar dacă trece filtrul
+# - Normalizare T/S (pelvis + scalare la umeri), fără rotație
+# - Features v2 (viteze încheieturi, % mâini sus, etc.)
+# - Pipeline XGB (Imputer+Scaler+XGB) + (opțional) calibrator .joblib
+# - Histerezis (tau_on/tau_off) + cooldown
+# - UI inline (nu cere templates/static), plus /debug și /selftest
 
 import os, json, time, threading, queue
 from collections import deque
@@ -19,28 +18,26 @@ import cv2
 import numpy as np
 import pandas as pd
 import joblib
-from flask import Flask, render_template, Response, jsonify
+from flask import Flask, Response, jsonify
 from flask_socketio import SocketIO
 
-# ===================== Helpers / Logging =====================
+# ========= Config =========
 LOG = True
 def log(*a):
     if LOG:
         print("[POSE]", *a, flush=True)
 
-# ===================== Camera/Feed config ====================
-USE_PICAM       = True   # Raspberry Pi: True; Laptop: False (USB cam)
+USE_PICAM       = True   # True pe Raspberry Pi (PiCamera2), False pentru USB cam
 CAM_INDEX       = 0
 W, H            = 640, 480
 JPEG_QUALITY    = 70
-MJPEG_HZ        = 30     # ~30 fps feed (independent de inferență)
+MJPEG_HZ        = 30
 
-# ===================== Pose/Decision config ==================
 POSE_IMGSZ       = 352
 POSE_FPS         = 5.0
 KP_OK_CONF       = 0.50
-KP_MIN_RATIO     = 0.50  # DEBUG: relaxat (în training era 0.80)
-MIN_DRAW_CONF    = 0.20  # prag mic pentru a vedea scheletul pe overlay
+KP_MIN_RATIO     = 0.50   # relaxat pt. demo (0.80 în producție)
+MIN_DRAW_CONF    = 0.20   # pentru overlay să vezi scheletul
 
 WINDOW_SEC       = 4.0
 HOP_SEC          = 0.5
@@ -49,23 +46,20 @@ DEFAULT_TAU_ON   = 0.60
 DEFAULT_TAU_OFF  = 0.55
 DEFAULT_COOLDOWN = 7.0
 
-# ===================== Paths (independente de CWD) ===========
-BASE_DIR    = Path(__file__).resolve().parent.parent     # repo root (~/Triton)
-APP_DIR     = Path(__file__).resolve().parent            # Triton_pose/
+# ========= Paths (independente de CWD) =========
+BASE_DIR    = Path(__file__).resolve().parent.parent     # ~/Triton
+APP_DIR     = Path(__file__).resolve().parent            # ~/Triton/Triton_pose
 MODELS_DIR  = BASE_DIR / "models"
 
-POSE_WEIGHTS    = str(MODELS_DIR / "yolo11n-pose.pt")    # sau pune yolov8n-pose.pt dacă folosești YOLOv8
+POSE_WEIGHTS    = str(MODELS_DIR / "yolo11n-pose.pt")
 XGB_PIPELINE    = str(MODELS_DIR / "xgb_pipeline.joblib")
 THRESHOLDS_JSON = str(MODELS_DIR / "threshold.json")
 FEATURE_SCHEMA  = str(MODELS_DIR / "features_schema.json")
 CALIBRATOR_PATH = str(MODELS_DIR / "calibrator.joblib")  # opțional
 
-# ===================== App/State =============================
-app = Flask(
-    __name__,
-    template_folder=str(APP_DIR / "templates"),   # <<— UI minimal de test e aici
-    static_folder=str(BASE_DIR / "static")
-)
+# ========= App/State =========
+# UI inline: nu folosim template/static, deci punem default-uri
+app = Flask(__name__)
 socketio = SocketIO(app, async_mode="threading")
 
 raw_lock   = threading.Lock()
@@ -90,7 +84,7 @@ tau_on = DEFAULT_TAU_ON
 tau_off = DEFAULT_TAU_OFF
 cooldown_s = DEFAULT_COOLDOWN
 
-# ===================== Thresholds / Calibrator ===============
+# ========= Praguri / Calibrator =========
 try:
     if os.path.exists(THRESHOLDS_JSON):
         with open(THRESHOLDS_JSON, "r", encoding="utf-8") as f:
@@ -114,7 +108,7 @@ except Exception as e:
     log("WARN calibrator load:", e)
     CALIBRATOR = None
 
-# ===================== YOLO / Torch ==========================
+# ========= YOLO / Torch =========
 from ultralytics import YOLO
 try:
     import torch
@@ -127,7 +121,7 @@ pose_model = YOLO(POSE_WEIGHTS); log("YOLO loaded:", POSE_WEIGHTS)
 XGB        = joblib.load(XGB_PIPELINE); log("XGB loaded:", XGB_PIPELINE)
 log(f"thresholds: tau_on={tau_on:.3f} tau_off={tau_off:.3f} cooldown={cooldown_s:.1f}s")
 
-# ===== Feature schema tolerantă (acceptă `columns` sau `feature_names`)
+# ========= Feature schema tolerantă =========
 FEATURE_LIST = None
 try:
     with open(FEATURE_SCHEMA, "r", encoding="utf-8") as f:
@@ -145,7 +139,7 @@ except Exception as e:
     log("feature_schema missing/unreadable:", e)
     FEATURE_LIST = None
 
-# ===== Keypoints idx
+# ========= KP idx =========
 NOSE=0; L_EYE=1; R_EYE=2; L_EAR=3; R_EAR=4
 L_SH=5; R_SH=6; L_EL=7; R_EL=8; L_WR=9; R_WR=10
 L_HIP=11; R_HIP=12; L_KNE=13; R_KNE=14; L_ANK=15; R_ANK=16
@@ -169,7 +163,7 @@ class FeatPacket:
     t_end: float
     feats: dict
 
-# ===================== Utils =================================
+# ========= Utils =========
 def blank_jpeg():
     img = np.zeros((H,W,3), np.uint8)
     return cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY])[1].tobytes()
@@ -190,7 +184,6 @@ def extract_xy_conf(res):
     else:
         conf = np.ones(xy.shape[0], dtype=np.float32)
 
-    # pad/trunc la 17
     if xy.shape[0] < 17:
         pad_xy = np.full((17 - xy.shape[0], 2), -1.0, np.float32)
         xy = np.vstack([xy, pad_xy])
@@ -236,7 +229,6 @@ def draw_pose_overlay(frame, xy, conf, min_conf=MIN_DRAW_CONF):
     return frame
 
 def pick_best_xy(res_obj, draw_conf=MIN_DRAW_CONF):
-    """Alege predicția cu cei mai mulți KP peste draw_conf, pentru overlay."""
     best = None
     best_count = -1
     seq = res_obj if isinstance(res_obj, (list, tuple)) else [res_obj]
@@ -291,9 +283,9 @@ def features_on_window(xs):
         "pelvis_disp_var":  pelvis_disp_var,
     }
 
-# ====================== CAMERA THREAD =======================
+# ========= Camera thread =========
 def camera_thread():
-    """Suport USB cam (OpenCV) sau PiCamera2 (RGB→BGR). MJPEG ~30Hz."""
+    """USB cam (OpenCV) sau PiCamera2 (RGB→BGR). MJPEG ~30Hz."""
     global latest_raw, latest_jpeg
     use_picam = False
     picam = None
@@ -348,7 +340,7 @@ def camera_thread():
         else:
             time.sleep(0.001)
 
-# ====================== OTHER THREADS =======================
+# ========= Worker threads =========
 def pose_estimator_thread():
     last_t = 0.0
     while True:
@@ -515,10 +507,103 @@ def classifier_thread():
         socketio.emit("decision", {"label": last_label, "proba": round(last_proba,3)})
         log(f"feat->cls   p={proba:.3f}  label={last_label}  on={consec_on} off={consec_off}")
 
-# ====================== Routes / Debug =======================
+# ========= Routes (UI inline + endpoints) =========
 @app.route("/")
 def index():
-    return render_template("index.test.html")
+    # Inline UI (fără dependențe externe în afara Socket.IO CDN)
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<title>Triton Pose Test</title>
+<meta name="viewport" content="width=1280, initial-scale=0.8">
+<style>
+:root {{ color-scheme: dark; }}
+body{{background:#0e0e0f;color:#eee;font-family:system-ui,Segoe UI,Arial,sans-serif;margin:0}}
+header{{padding:10px 14px;background:#151517;border-bottom:1px solid #2a2a2e}}
+h1{{margin:0;font-size:18px}}
+.controls{{display:flex;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid #202024;flex-wrap:wrap}}
+button{{padding:8px 14px;border:0;border-radius:10px;background:#2a6cff;color:#fff;cursor:pointer;font-weight:600}}
+button.secondary{{background:#3a3a44}}
+button:disabled{{opacity:.6;cursor:not-allowed}}
+.status{{margin-left:8px;opacity:.9}}
+.grid{{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px}}
+.pane{{background:#121216;border:1px solid #202024;border-radius:12px;overflow:hidden}}
+.pane h3{{margin:0;padding:8px 10px;border-bottom:1px solid #202024;background:#16161b}}
+.pane img{{width:100%;height:520px;object-fit:contain;background:#000}}
+.readout{{display:flex;gap:16px;align-items:center;padding:10px 14px;border-top:1px solid #202024}}
+.badge{{display:inline-block;padding:3px 8px;border-radius:999px;background:#1b1b22;border:1px solid #2a2a2e}}
+.ok{{color:#8ef0a3}} .warn{{color:#ffd479}}
+.mono{{font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}}
+@media (max-width:1200px){{ .grid{{grid-template-columns:1fr}} .pane img{{height:360px}} }}
+</style>
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+<body>
+<header><h1>Triton — Pose + XGB (demo)</h1></header>
+<div class="controls">
+  <button id="startBtn">Start analiza</button>
+  <button id="stopBtn" class="secondary">Stop</button>
+  <span class="status mono" id="statusText">status: idle</span>
+  <span class="badge mono" id="queueInfo">queues: kp=0 norm=0 feat=0</span>
+  <span class="badge mono" id="modelInfo">label=N/A p=0.000</span>
+</div>
+<div class="grid">
+  <div class="pane">
+    <h3>RAW</h3>
+    <img id="raw" src="/video_feed" alt="raw stream">
+  </div>
+  <div class="pane">
+    <h3>POSE (schelet + scor)</h3>
+    <img id="pose" src="/pose_feed" alt="pose stream">
+  </div>
+</div>
+<div class="readout mono" id="debug">
+  <span id="sock" class="badge">socket: …</span>
+  <span id="thr"  class="badge">τ_on/τ_off/cooldown: …</span>
+  <span id="running" class="badge">running: false</span>
+</div>
+<script>
+(function(){{
+  const $ = s => document.querySelector(s);
+  const startBtn = $('#startBtn'), stopBtn=$('#stopBtn');
+  const statusEl = $('#statusText'), queueEl=$('#queueInfo'), modelEl=$('#modelInfo');
+  const sockEl = $('#sock'), thrEl=$('#thr'), runEl=$('#running');
+
+  function setStatus(t){{ statusEl.textContent = 'status: ' + t; }}
+  function setQueues(kp,norm,feat){{ queueEl.textContent = `queues: kp=${{kp}} norm=${{norm}} feat=${{feat}}`; }}
+  function setModel(label,p){{ modelEl.textContent = `label=${{label}} p=${{p.toFixed(3)}}`; modelEl.className='badge mono ' + (label==='INEC'?'warn':'ok'); }}
+  function setRunning(b){{ runEl.textContent = 'running: ' + b; }}
+
+  startBtn.onclick = async ()=>{{ try{{ await fetch('/start',{{method:'POST'}}); setStatus('running'); setRunning(true); }}catch(e){{ setStatus('err start'); }} }};
+  stopBtn.onclick  = async ()=>{{ try{{ await fetch('/stop', {{method:'POST'}}); setStatus('stopped'); setRunning(false); }}catch(e){{ setStatus('err stop'); }} }};
+
+  const sock = io(location.protocol + '//' + location.host);
+  sock.on('connect', ()=>{{ sockEl.textContent='socket: connected'; }});
+  sock.on('disconnect', ()=>{{ sockEl.textContent='socket: disconnected'; }});
+  sock.on('decision', d=>{{ const label=d?.label??'N/A'; const p=+(d?.proba??0); setModel(label,p); }});
+
+  async function pollDebug(){{
+    try{{
+      const r = await fetch('/debug'); if(!r.ok) throw 0;
+      const j = await r.json();
+      setQueues(j.queues.kp, j.queues.norm, j.queues.feat);
+      setRunning(!!j.running);
+      thrEl.textContent = `τ_on/τ_off/cooldown: ${{j.tau_on.toFixed(3)}}/${{j.tau_off.toFixed(3)}}/${{j.cooldown_s.toFixed(1)}}s`;
+    }}catch(_){{
+    }}finally{{
+      setTimeout(pollDebug, 1500);
+    }}
+  }}
+  pollDebug();
+
+  function bust(id, path){{ const el=document.getElementById(id); el.src = path + '?ts=' + Date.now(); }}
+  startBtn.addEventListener('click', ()=>{{ bust('raw','/video_feed'); bust('pose','/pose_feed'); }});
+  stopBtn .addEventListener('click', ()=>{{ bust('raw','/video_feed'); bust('pose','/pose_feed'); }});
+}})();
+</script>
+</body></html>
+"""
+    return html
 
 @app.route("/start", methods=["POST"])
 def start():
@@ -545,7 +630,7 @@ def video_feed():
             with jpeg_lock:
                 frame = latest_jpeg if latest_jpeg is not None else blank_jpeg()
             yield boundary + frame + b"\r\n"
-            time.sleep(0.03)
+            time.sleep(1.0 / MJPEG_HZ)
     return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
 @app.route("/pose_feed")
@@ -556,7 +641,7 @@ def pose_feed():
             with pose_lock:
                 frame = pose_jpeg if pose_jpeg is not None else blank_jpeg()
             yield boundary + frame + b"\r\n"
-            time.sleep(0.03)
+            time.sleep(1.0 / MJPEG_HZ)
     return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
 @app.route("/selftest")
@@ -585,7 +670,7 @@ def debug_status():
         "tau_on": tau_on, "tau_off": tau_off, "cooldown_s": cooldown_s
     })
 
-# ====================== Boot threads =========================
+# ========= Boot threads =========
 def boot():
     threading.Thread(target=camera_thread,            daemon=True, name="Camera").start()
     threading.Thread(target=pose_estimator_thread,    daemon=True, name="PoseEstimator").start()
