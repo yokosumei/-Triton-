@@ -1,18 +1,19 @@
 #!/usr/bin/env python
-# Triton_pose / pose_test.py — runtime v2 complet (YOLO-Pose + XGB) cu suport USB cam / PiCamera2
-# Triton_pose / pose_test.py — runtime v2 complet (showcase doar Pose + XGB)
+# Triton_pose / pose_test.py — YOLO Pose + XGB (runtime v2, complet, cu DEBUG)
 # - 4 fire + cozi (PoseEstimator -> Normalizer -> FeatureExtractor -> Classifier)
-# - Fereastra temporizata 4s, HOP=0.5s (ca la training v2)
-# - Filtru calitate frame: ≥80% kp cu conf≥0.5
-# - Normalizare T/S: pelvis center + shoulder distance scale (fara rotatie)
-# - Features v2 (nume identice cu make_features_v2.py)
-# - Pipeline XGB (Imputer+Scaler+XGB) + calibrare Platt (optional)
-# - Histerezis (tau_on/tau_off) + cooldown (din threshold.json sau defaults)
+# - Fereastra temporizată 4s, HOP=0.5s
+# - Filtru calitate frame pentru decizie (≥50% kp cu conf≥0.5 — relaxat pentru demo)
+# - Normalizare T/S: pelvis center + shoulder-distance scale
+# - Features v2 identice cu make_features_v2.py
+# - Pipeline XGB (Imputer+Scaler+XGB) + calibrare Platt (opțional)
+# - Histerezis (tau_on/tau_off) + cooldown
 # - UI minimal: / (Start/Stop), /video_feed (RAW), /pose_feed (overlay), SocketIO "decision"
+# - DEBUG: /selftest (testează XGB), /debug (stare runtime), loguri în toate firele
 
 import os, json, time, threading, queue
 from collections import deque
 from dataclasses import dataclass
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -21,18 +22,25 @@ import joblib
 from flask import Flask, render_template, Response, jsonify
 from flask_socketio import SocketIO
 
-# ===================== Camera source =====================
-USE_PICAM       = True   # <-- pe Raspberry Pi: True; pe laptop: False (USB cam)
+# ===================== Helpers / Logging =====================
+LOG = True
+def log(*a):
+    if LOG:
+        print("[POSE]", *a, flush=True)
+
+# ===================== Camera/Feed config ====================
+USE_PICAM       = True   # Raspberry Pi: True; Laptop: False (USB cam)
 CAM_INDEX       = 0
 W, H            = 640, 480
 JPEG_QUALITY    = 70
-MJPEG_HZ        = 30     # ~30 fps în feed (independent de inferență)
+MJPEG_HZ        = 30     # ~30 fps feed (independent de inferență)
 
-# ===================== Pose/Decision config ==============
+# ===================== Pose/Decision config ==================
 POSE_IMGSZ       = 352
 POSE_FPS         = 5.0
 KP_OK_CONF       = 0.50
-KP_MIN_RATIO     = 0.80
+KP_MIN_RATIO     = 0.50  # DEBUG: relaxat (în training era 0.80)
+MIN_DRAW_CONF    = 0.20  # prag mic pentru a vedea scheletul pe overlay
 
 WINDOW_SEC       = 4.0
 HOP_SEC          = 0.5
@@ -41,15 +49,18 @@ DEFAULT_TAU_ON   = 0.60
 DEFAULT_TAU_OFF  = 0.55
 DEFAULT_COOLDOWN = 7.0
 
-MODELS_DIR       = "models"
-POSE_WEIGHTS     = os.path.join(MODELS_DIR, "yolo11n-pose.pt")
-XGB_PIPELINE     = os.path.join(MODELS_DIR, "xgb_pipeline.joblib")
-THRESHOLDS_JSON  = os.path.join(MODELS_DIR, "threshold.json")
-FEATURE_SCHEMA   = os.path.join(MODELS_DIR, "features_schema.json")
-CALIBRATOR_PATH  = os.path.join(MODELS_DIR, "calibrator.joblib")
+# ===================== Models (path static to repo root) =====
+BASE_DIR    = Path(__file__).resolve().parent.parent     # repo root
+MODELS_DIR  = BASE_DIR / "models"
 
-# ===================== App/State =========================
-app = Flask(__name__, template_folder="templates", static_folder="static")
+POSE_WEIGHTS    = str(MODELS_DIR / "yolo11n-pose.pt")    # YOLOv11 Pose (sau schimbă în yolov8n-pose.pt)
+XGB_PIPELINE    = str(MODELS_DIR / "xgb_pipeline.joblib")
+THRESHOLDS_JSON = str(MODELS_DIR / "threshold.json")
+FEATURE_SCHEMA  = str(MODELS_DIR / "features_schema.json")
+CALIBRATOR_PATH = str(MODELS_DIR / "calibrator.joblib")  # opțional
+
+# ===================== App/State =============================
+app = Flask(__name__, template_folder=str(BASE_DIR / "templates"), static_folder=str(BASE_DIR / "static"))
 socketio = SocketIO(app, async_mode="threading")
 
 raw_lock   = threading.Lock()
@@ -74,6 +85,7 @@ tau_on = DEFAULT_TAU_ON
 tau_off = DEFAULT_TAU_OFF
 cooldown_s = DEFAULT_COOLDOWN
 
+# ===================== Thresholds / Calibrator ===============
 try:
     if os.path.exists(THRESHOLDS_JSON):
         with open(THRESHOLDS_JSON, "r", encoding="utf-8") as f:
@@ -83,19 +95,22 @@ try:
             tau_off = float(th.get("tau_off", max(0.5, tau_on - 0.05)))
             cooldown_s = float(th.get("cooldown_s", DEFAULT_COOLDOWN))
         elif "threshold" in th:
+            # prag din OOF/Platt
             tau_on = float(th["threshold"])
             tau_off = max(0.5, tau_on - 0.05)
             cooldown_s = DEFAULT_COOLDOWN
-except Exception:
-    pass
+except Exception as e:
+    log("WARN thresholds load:", e)
 
 CALIBRATOR = None
 try:
     if os.path.exists(CALIBRATOR_PATH):
         CALIBRATOR = joblib.load(CALIBRATOR_PATH)
-except Exception:
+except Exception as e:
+    log("WARN calibrator load:", e)
     CALIBRATOR = None
 
+# ===================== YOLO / Torch ==========================
 from ultralytics import YOLO
 try:
     import torch
@@ -104,8 +119,15 @@ try:
 except Exception:
     DEVICE, HALF = "cpu", False
 
-pose_model = YOLO(POSE_WEIGHTS)
-XGB        = joblib.load(XGB_PIPELINE)
+pose_model = YOLO(POSE_WEIGHTS); log("YOLO loaded:", POSE_WEIGHTS)
+XGB        = joblib.load(XGB_PIPELINE); log("XGB loaded:", XGB_PIPELINE)
+log(f"thresholds: tau_on={tau_on:.3f} tau_off={tau_off:.3f} cooldown={cooldown_s:.1f}s")
+try:
+    with open(FEATURE_SCHEMA, "r", encoding="utf-8") as f:
+        _schema = json.load(f)
+    log("feature_schema OK, features:", len(_schema.get("feature_names", [])))
+except Exception as e:
+    log("feature_schema missing/unreadable:", e)
 
 # ===== Keypoints idx
 NOSE=0; L_EYE=1; R_EYE=2; L_EAR=3; R_EAR=4
@@ -131,6 +153,7 @@ class FeatPacket:
     t_end: float
     feats: dict
 
+# ===================== Utils =================================
 def blank_jpeg():
     img = np.zeros((H,W,3), np.uint8)
     return cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY])[1].tobytes()
@@ -151,6 +174,7 @@ def extract_xy_conf(res):
     else:
         conf = np.ones(xy.shape[0], dtype=np.float32)
 
+    # pad/trunc la 17
     if xy.shape[0] < 17:
         pad_xy = np.full((17 - xy.shape[0], 2), -1.0, np.float32)
         xy = np.vstack([xy, pad_xy])
@@ -182,22 +206,37 @@ def normalize_TS(xy):
     xy[valid] /= (scale + 1e-6)
     return xy
 
-def draw_pose_overlay(frame, xy, conf):
+def draw_pose_overlay(frame, xy, conf, min_conf=MIN_DRAW_CONF):
     CONN = [(0,1),(0,2),(1,3),(2,4),(5,6),(5,7),(7,9),(6,8),(8,10),
             (5,11),(6,12),(11,12),(11,13),(13,15),(12,14),(14,16)]
     for i,(x,y) in enumerate(xy):
-        if conf[i] >= KP_OK_CONF and x>=0 and y>=0:
+        if conf[i] >= min_conf and x>=0 and y>=0:
             cv2.circle(frame,(int(x),int(y)),3,(0,255,0),-1)
     for i,j in CONN:
-        if conf[i] >= KP_OK_CONF and conf[j] >= KP_OK_CONF:
+        if conf[i] >= min_conf and conf[j] >= min_conf:
             x1,y1 = xy[i]; x2,y2 = xy[j]
             if x1>=0 and y1>=0 and x2>=0 and y2>=0:
                 cv2.line(frame,(int(x1),int(y1)),(int(x2),int(y2)),(255,0,0),2)
+    return frame
+
+def pick_best_xy(res_obj, draw_conf=MIN_DRAW_CONF):
+    """Alege predicția cu cei mai mulți KP peste draw_conf, pentru overlay."""
+    best = None
+    best_count = -1
+    seq = res_obj if isinstance(res_obj, (list, tuple)) else [res_obj]
+    for r in seq:
+        xy0, cf0 = extract_xy_conf(r)
+        if xy0 is None or cf0 is None:
+            continue
+        count = int((cf0 >= draw_conf).sum())
+        if count > best_count:
+            best = (xy0, cf0)
+            best_count = count
+    return best
 
 def features_on_window(xs):
     X = np.asarray(xs, dtype=np.float32)
-    T = X.shape[0]
-    if T < 2: return None
+    if X.shape[0] < 2: return None
 
     vL = np.linalg.norm(np.diff(X[:, L_WR, :], axis=0), axis=1)
     vR = np.linalg.norm(np.diff(X[:, R_WR, :], axis=0), axis=1)
@@ -236,7 +275,7 @@ def features_on_window(xs):
         "pelvis_disp_var":  pelvis_disp_var,
     }
 
-# ====================== CAMERA THREAD ======================
+# ====================== CAMERA THREAD =======================
 def camera_thread():
     """Suport USB cam (OpenCV) sau PiCamera2 (RGB→BGR). MJPEG ~30Hz."""
     global latest_raw, latest_jpeg
@@ -247,35 +286,38 @@ def camera_thread():
         try:
             from picamera2 import Picamera2
             picam = Picamera2()
-            # Video config: 640x480, RGB888 pentru conversie rapidă la BGR
             cfg = picam.create_video_configuration(main={"size": (W, H), "format": "RGB888"})
             picam.configure(cfg)
             picam.start()
             use_picam = True
-            print("[Cam] Using PiCamera2 at", (W, H))
+            log("Using PiCamera2 at", (W, H))
         except Exception as e:
-            print("[Cam] PiCamera2 not available, falling back to USB cam:", e)
+            log("PiCamera2 not available, fallback to USB:", e)
 
     if not use_picam:
-        cap = cv2.VideoCapture(CAM_INDEX)
+        cap = cv2.VideoCapture(CAM_INDEX, cv2.CAP_V4L2)
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
         cap.set(cv2.CAP_PROP_FRAME_WIDTH,  W)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, H)
+        cap.set(cv2.CAP_PROP_FPS, 30)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         if not cap.isOpened():
-            print("[ERR] Camera (USB) nu poate fi deschisa."); return
-        print("[Cam] Using USB camera at", (W, H))
+            log("[ERR] USB camera cannot open."); return
+        log("Using USB camera at", (W, H))
 
     next_jpeg_at = 0.0
     period = 1.0 / MJPEG_HZ
 
     while True:
         if use_picam:
-            # Picamera2 returnează RGB
             frame_rgb = picam.capture_array()
             frame = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
         else:
             ret, frame = cap.read()
             if not ret:
-                time.sleep(0.005); continue
+                cap.grab(); ret, frame = cap.retrieve()
+                if not ret:
+                    time.sleep(0.01); continue
 
         with raw_lock:
             latest_raw = frame
@@ -290,7 +332,7 @@ def camera_thread():
         else:
             time.sleep(0.001)
 
-# ====================== OTHER THREADS (identic) ============
+# ====================== OTHER THREADS =======================
 def pose_estimator_thread():
     last_t = 0.0
     while True:
@@ -307,26 +349,39 @@ def pose_estimator_thread():
             time.sleep(0.005); continue
 
         res = pose_model.predict(frame, imgsz=POSE_IMGSZ, device=DEVICE, half=HALF, verbose=False)
-        xy, conf = None, None
-        for r in (res if isinstance(res,(list,tuple)) else [res]):
-            xy0, cf0 = extract_xy_conf(r)
-            if xy0 is None: continue
-            if frame_quality_ok(cf0):
-                xy, conf = xy0, cf0
-                break
+        best = pick_best_xy(res, MIN_DRAW_CONF)
 
-        if xy is not None:
+        if best is not None:
+            xy, conf = best
             overlay = frame.copy()
-            draw_pose_overlay(overlay, xy, conf)
+            draw_pose_overlay(overlay, xy, conf, min_conf=MIN_DRAW_CONF)
+
+            vis_ratio = float((conf >= KP_OK_CONF).mean())
+            cv2.putText(overlay, f"vis={vis_ratio:.2f}  {last_label} p={last_proba:.2f}", (10,24),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.65,
+                        (0,0,255) if last_label=='INEC' else (0,255,0), 2)
+
             ok, buf = cv2.imencode(".jpg", overlay, [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY])
             if ok:
                 with pose_lock:
                     global pose_jpeg
                     pose_jpeg = buf.tobytes()
 
-            pkt = KPPacket(t=now, frame=frame, xy=xy, conf=conf)
-            try: q_kp.put(pkt, timeout=0.01)
-            except queue.Full: pass
+            pushed = False
+            if frame_quality_ok(conf):
+                pkt = KPPacket(t=now, frame=frame, xy=xy, conf=conf)
+                try:
+                    q_kp.put(pkt, timeout=0.01)
+                    pushed = True
+                except queue.Full:
+                    pass
+            if pushed:
+                log(f"pose->kp   vis={vis_ratio:.2f}  q_kp={q_kp.qsize()}")
+        else:
+            ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY])
+            if ok:
+                with pose_lock:
+                    pose_jpeg = buf.tobytes()
 
 def normalizer_thread():
     while True:
@@ -338,8 +393,11 @@ def normalizer_thread():
             continue
         xy_norm = normalize_TS(pkt.xy)
         npkt = NormPacket(t=pkt.t, xy_norm=xy_norm, conf=pkt.conf)
-        try: q_norm.put(npkt, timeout=0.01)
-        except queue.Full: pass
+        try:
+            q_norm.put(npkt, timeout=0.01)
+            log(f"kp->norm    q_norm={q_norm.qsize()}")
+        except queue.Full:
+            pass
 
 def feature_extractor_thread():
     win = deque()
@@ -368,8 +426,11 @@ def feature_extractor_thread():
         if feats is None:
             continue
         fpkt = FeatPacket(t_start=now - WINDOW_SEC, t_end=now, feats=feats)
-        try: q_feat.put(fpkt, timeout=0.01)
-        except queue.Full: pass
+        try:
+            q_feat.put(fpkt, timeout=0.01)
+            log(f"norm->feat  window={len(xs)}  q_feat={q_feat.qsize()}")
+        except queue.Full:
+            pass
 
 def classifier_thread():
     global last_label, last_proba, cooldown_until, consec_on, consec_off
@@ -419,6 +480,7 @@ def classifier_thread():
         if now < cooldown_until:
             last_proba = proba
             socketio.emit("decision", {"label": last_label, "proba": round(last_proba,3)})
+            log(f"feat->cls  (cooldown) p={proba:.3f} label={last_label}")
             continue
 
         if proba >= tau_on:
@@ -442,8 +504,9 @@ def classifier_thread():
             last_label = new_label
 
         socketio.emit("decision", {"label": last_label, "proba": round(last_proba,3)})
+        log(f"feat->cls   p={proba:.3f}  label={last_label}  on={consec_on} off={consec_off}")
 
-# ====================== Routes / Boot ======================
+# ====================== Routes / Debug =======================
 @app.route("/")
 def index():
     return render_template("index.test.html")
@@ -455,12 +518,14 @@ def start():
     cooldown_until = 0.0
     consec_on = consec_off = 0
     last_label, last_proba = "N/A", 0.0
+    log("== START ==")
     return jsonify({"status":"started"})
 
 @app.route("/stop", methods=["POST"])
 def stop():
     global running
     running = False
+    log("== STOP ==")
     return jsonify({"status":"stopped"})
 
 @app.route("/video_feed")
@@ -485,6 +550,37 @@ def pose_feed():
             time.sleep(0.03)
     return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
+@app.route("/selftest")
+def selftest():
+    cols = None
+    try:
+        with open(FEATURE_SCHEMA, "r", encoding="utf-8") as f:
+            cols = json.load(f).get("feature_names", [])
+    except Exception:
+        if hasattr(XGB, "feature_names_in_"):
+            cols = list(XGB.feature_names_in_)
+    if not cols:
+        return jsonify({"ok": False, "err": "no feature schema"}), 500
+    row = {c: np.nan for c in cols}
+    X = pd.DataFrame([row], columns=cols)
+    try:
+        classes = getattr(XGB, "classes_", [0,1])
+        pos_idx = list(classes).index(1) if 1 in classes else 1
+        p = float(XGB.predict_proba(X)[0, pos_idx])
+    except Exception as e:
+        return jsonify({"ok": False, "err": str(e)}), 500
+    return jsonify({"ok": True, "proba": round(p,3), "n_features": len(cols)})
+
+@app.route("/debug")
+def debug_status():
+    return jsonify({
+        "running": running,
+        "queues": {"kp": q_kp.qsize(), "norm": q_norm.qsize(), "feat": q_feat.qsize()},
+        "label": last_label, "proba": round(last_proba,3),
+        "tau_on": tau_on, "tau_off": tau_off, "cooldown_s": cooldown_s
+    })
+
+# ====================== Boot threads =========================
 def boot():
     threading.Thread(target=camera_thread,            daemon=True, name="Camera").start()
     threading.Thread(target=pose_estimator_thread,    daemon=True, name="PoseEstimator").start()
@@ -495,5 +591,5 @@ def boot():
 boot()
 
 if __name__ == "__main__":
-    print("Triton_pose v2 live at http://0.0.0.0:5000 (PiCamera2=" + str(USE_PICAM) + ")")
+    print(f"Triton_pose v2 live at http://0.0.0.0:5000 (PiCamera2={USE_PICAM})")
     socketio.run(app, host="0.0.0.0", port=5000)
