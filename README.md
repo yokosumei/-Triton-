@@ -8,7 +8,7 @@
 > **Triton** — „ochiul deasupra mării” al salvamarilor. Un sistem AI + dronă care monitorizează mediul marin, detectează situații de risc de înec și poate declanșa intervenții rapide în mod autonom.
 
 ![](media/overview.jpg)  
-<img src="Media/Poze/Triton Logo.png" alt="Logo" width="240">                  <img src="Media/Poze/QR code.jpg" alt="qr code" width="240">
+<img src="Media/Poze/Triton Logo.png" alt="Logo" width="60">                  <img src="Media/Poze/QR code.jpg" alt="qr code" width="100">
 *Video demonstrativ — va fi adăugat în `media/`*
 
 ---
