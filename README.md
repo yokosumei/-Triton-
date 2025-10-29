@@ -1,6 +1,5 @@
 # Triton    
-<img src="Media/Poze/Triton Logo.png" alt="Logo" width="120">
-
+<img src="Media/Poze/Triton Logo.png" alt="Logo" width="120">    <>
 [![Platform](https://img.shields.io/badge/platform-RaspberryPi4-blue?style=flat-square)]()
 [![Python](https://img.shields.io/badge/python-3.11+-blue?style=flat-square)]()
 [![Drone](https://img.shields.io/badge/Drone-Robot+-blue?style=flat-square)]()
