@@ -1163,7 +1163,7 @@ def livings_inference_thread(video=None):
             encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY]
             mar_output_frame = cv2.imencode('.jpg', annotated, encode_params)[1].tobytes()
 
-        time.sleep(0.01
+        time.sleep(0.01)
 # Rulează modelul YOLOv11 de segmentare semantică pentru a colora zonele din apă pe baza adâncimii sau a curenților de rupere.
 # Suportă clase ca: „lvl_mic”, „lvl_mediu”, „lvl_adanc”, „rip_current”.
 # Fiecare mască este desenată peste imaginea originală și este transmisă prin streamul `seg_feed`.
