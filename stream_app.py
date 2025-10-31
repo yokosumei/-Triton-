@@ -72,15 +72,17 @@ DEFAULT_TAU_OFF  = 0.55
 DEFAULT_COOLDOWN = 7.0
 
 # ========= Paths (independente de CWD) =========
-BASE_DIR    = Path(__file__).resolve().parent.parent     # ~/Triton
-APP_DIR     = Path(__file__).resolve().parent            # ~/Triton/Triton_pose
-MODELS_DIR  = BASE_DIR / "models"
+# stream_app.py este în /home/dariuc/Triton → vrem BASE_DIR = /home/dariuc/Triton
+BASE_DIR   = Path(__file__).resolve().parent
+APP_DIR    = BASE_DIR
+MODELS_DIR = BASE_DIR / "models"
 
 POSE_WEIGHTS    = str(MODELS_DIR / "yolo11n-pose.pt")
 XGB_PIPELINE    = str(MODELS_DIR / "xgb_pipeline.joblib")
 THRESHOLDS_JSON = str(MODELS_DIR / "threshold.json")
 FEATURE_SCHEMA  = str(MODELS_DIR / "features_schema.json")
-CALIBRATOR_PATH = str(MODELS_DIR / "calibrator.joblib")  # opțional
+CALIBRATOR_PATH = str(MODELS_DIR / "calibrator.joblib")
+
 
 
 
