@@ -1101,59 +1101,68 @@ def livings_inference_thread(video=None):
         frame = data["image"]
         # asigură-te că e ndarray C-contiguous (evită surprize la loader)
         frame = np.ascontiguousarray(frame)
+        annotated = frame.copy() 
         gps_info = data["gps"]
         
-        #results = model.predict(source=data, conf=0.4, stream=True)
-        results = model.predict(
-            source=frame,
-            imgsz=LIVINGS_IMG_SZ,
-            conf=0.40,
-            device=DEVICE,
-            half=(DEVICE != "cpu"),
-            stream=False,
-            verbose=False
-        )
+        try:
+            results = model.predict(
+                source=frame,
+                imgsz=LIVINGS_IMG_SZ,
+                conf=0.40,
+                device=DEVICE,
+                half=(DEVICE != "cpu"),
+                stream=False,
+                verbose=False
+            )
+        except Exception as e:
+            logging.exception("[LIVINGS] Eroare la predict: %s", e)
+            # totuși trimitem ultimul annotated (frame simplu) ca să nu cadă feed-ul
+            with mar_lock:
+                encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY]
+                mar_output_frame = cv2.imencode('.jpg', annotated, encode_params)[1].tobytes()
+            time.sleep(0.01)
+            continue
      
         
         
-        for r in results:
-            boxes = r.boxes
-            for box in boxes:
-                cls_id = int(box.cls[0])
-                conf = float(box.conf[0])
-                
-                if 0 <= cls_id < 3:
-                    name = ["Meduze", "Rechin", "person"][cls_id]
-                else:
-                    print(f"[WARN] cls_id invalid {cls_id} -> ignorăm")
-                    continue
-                
-                label = f"{name} {conf:.2f}"
-                obiecte_detectate.append(name)
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
-                cv2.putText(frame, label, (x1, y1 - 10),
+        if results:
+            r = results[0]
+            if hasattr(r, "boxes") and r.boxes is not None:
+                for box in r.boxes:
+                    cls_id = int(box.cls[0])
+                    conf   = float(box.conf[0])
+
+                    if 0 <= cls_id < 3:
+                        name = ["Meduze", "Rechin", "person"][cls_id]
+                    else:
+                        logging.debug("[LIVINGS] cls_id invalid: %s", cls_id)
+                        continue
+
+                    obiecte_detectate.append(name)
+                    x1, y1, x2, y2 = map(int, box.xyxy[0])
+                    label = f"{name} {conf:.2f}"
+                    cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 255), 2)
+                    cv2.putText(annotated, label, (x1, y1 - 10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
-        if smart_stream_mode:
-            for r in results:
+        if smart_stream_mode and results:
+            r = results[0]
+            if hasattr(r, "boxes") and r.boxes is not None:
                 for box in r.boxes:
                     cls_id = int(box.cls[0])
                     if cls_id == 2:  # person
                         print("[SMART SWITCH] Detected person → switching to raw + xgb")
                         stop_detection_liv_event.set()
                         stop_segmentation_event.set()
-
                         socketio.emit("stream_config_update", {"left": "raw", "right": "xgb"})
-
                         global pose_thread, stop_pose_event
                         if pose_thread is None or not pose_thread.is_alive():
                             stop_pose_event.clear()
                             pose_thread = start_thread(pose_xgb_inference_thread, "PoseXGBDetection")
-                        return        
+                        return
 
-
-        socketio.emit("detection_update", {"obiecte": obiecte_detectate})
+        socketio.emit("detection_update", {"obiecte": obiecte_detectate})    
     
         with mar_lock:
             encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY]
