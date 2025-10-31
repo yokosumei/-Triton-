@@ -1156,10 +1156,8 @@ def livings_inference_thread(video=None):
         socketio.emit("detection_update", {"obiecte": obiecte_detectate})
     
         with mar_lock:
-            if obiecte_detectate:
-                #mar_output_frame = cv2.imencode('.jpg', frame)[1].tobytes()
-                encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY]
-                jpeg = cv2.imencode('.jpg', frame, encode_params)[1].tobytes()
+            encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY]
+            mar_output_frame = cv2.imencode('.jpg', annotated, encode_params)[1].tobytes()
         time.sleep(0.01)
 
 # Rulează modelul YOLOv11 de segmentare semantică pentru a colora zonele din apă pe baza adâncimii sau a curenților de rupere.
