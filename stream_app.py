@@ -25,7 +25,8 @@ import cv2
 import numpy as np
 import pandas as pd
 import joblib
-from flask import Flask, Response, jsonify, render_template
+from flask import Flask, Response, jsonify, render_template, request
+
 from flask_socketio import SocketIO
 
 import collections, collections.abc
