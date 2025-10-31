@@ -28,6 +28,11 @@ import joblib
 from flask import Flask, Response, jsonify, render_template
 from flask_socketio import SocketIO
 
+import collections, collections.abc
+collections.MutableMapping = collections.abc.MutableMapping
+collections.MutableSet = collections.abc.MutableSet
+collections.Mapping = collections.abc.Mapping
+collections.Sequence = collections.abc.Sequence
 
 from dronekit import connect, VehicleMode, LocationGlobalRelative
 import math
