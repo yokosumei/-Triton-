@@ -1576,7 +1576,7 @@ def set_right_stream():
             stop_segmentation_event.set()
             stop_pose_event.set()
             pose_thread_started=False
-            loging.debug("MMMMMMMMMAAAAAAARRRRRRRR")
+            logging.debug("MMMMMMMMMAAAAAAARRRRRRRR")
             #pornire thread
             if detection_liv_thread is None or not detection_liv_thread.is_alive():
                 stop_detection_liv_event.clear()
