@@ -51,11 +51,11 @@ except Exception:
 import logging
 
 logging.basicConfig(
-    level=logging.DEBUG,  # <- era INFO
+    level=logging.INFO,  # <- era INFO
     format='[%(levelname)s] (%(threadName)s) %(message)s'
 )
 # (opțional) dacă vrei și Flask/Werkzeug în DEBUG:
-logging.getLogger('werkzeug').setLevel(logging.DEBUG)
+logging.getLogger('werkzeug').setLevel(logging.INFO)
 
  
 # ========= Config =========
@@ -1575,7 +1575,7 @@ def set_right_stream():
             stop_segmentation_event.set()
             stop_pose_event.set()
             pose_thread_started=False
-            logging.debug("MMMMMMMMMAAAAAAARRRRRRRR")
+            logging.info("MMMMMMMMMAAAAAAARRRRRRRR")
             #pornire thread
             if detection_liv_thread is None or not detection_liv_thread.is_alive():
                 stop_detection_liv_event.clear()
