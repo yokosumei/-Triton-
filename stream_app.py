@@ -1,13 +1,20 @@
 from matplotlib.pyplot import step
 
+
 from werkzeug.utils import secure_filename
 import pandas as pd
 import onnxruntime as ort
 import uuid
+
 import eventlet
+
 import RPi.GPIO as GPIO
+from queue import Queue
+
 import atexit
+
 import logging
+
 
 import os, json, time, threading, queue
 from collections import deque
@@ -18,11 +25,17 @@ import cv2
 import numpy as np
 import pandas as pd
 import joblib
-from flask import Flask, Response, jsonify, render_template
+from flask import Flask, Response, jsonify, render_template, request
+
 from flask_socketio import SocketIO
 
+import collections, collections.abc
+collections.MutableMapping = collections.abc.MutableMapping
+collections.MutableSet = collections.abc.MutableSet
+collections.Mapping = collections.abc.Mapping
+collections.Sequence = collections.abc.Sequence
 
-from dronekit2 import connect, VehicleMode, LocationGlobalRelative
+from dronekit import connect, VehicleMode, LocationGlobalRelative
 import math
 
 from pymavlink import mavutil
@@ -60,21 +73,23 @@ DEFAULT_TAU_OFF  = 0.55
 DEFAULT_COOLDOWN = 7.0
 
 # ========= Paths (independente de CWD) =========
-BASE_DIR    = Path(__file__).resolve().parent    # ~/Triton
-APP_DIR     = BASE_DIR           # ~/Triton/Triton_pose
-MODELS_DIR  = BASE_DIR / "models"
+# stream_app.py este în /home/dariuc/Triton → vrem BASE_DIR = /home/dariuc/Triton
+BASE_DIR   = Path(__file__).resolve().parent
+APP_DIR    = BASE_DIR
+MODELS_DIR = BASE_DIR / "models"
 
 POSE_WEIGHTS    = str(MODELS_DIR / "yolo11n-pose.pt")
 XGB_PIPELINE    = str(MODELS_DIR / "xgb_pipeline.joblib")
 THRESHOLDS_JSON = str(MODELS_DIR / "threshold.json")
 FEATURE_SCHEMA  = str(MODELS_DIR / "features_schema.json")
-CALIBRATOR_PATH = str(MODELS_DIR / "calibrator.joblib")  # opțional
+CALIBRATOR_PATH = str(MODELS_DIR / "calibrator.joblib")
+
 
 
 
 # ========= App/State =========
 # Acum folosim template_folder explicit către Triton_pose/templates
-app = Flask(__name__, template_folder=str(APP_DIR /"templates"))
+app = Flask(__name__, template_folder=str(APP_DIR / "templates"))
 socketio = SocketIO(app, async_mode="threading")
 
 
@@ -185,6 +200,10 @@ class FeatPacket:
 
 
 
+def _gps_get(s, key, default=None):
+    if isinstance(s, dict):
+        return s.get(key, default)
+    return getattr(s, key, default)
 
 
 
@@ -875,29 +894,25 @@ def camera_thread():
 
         with raw_lock:
             latest_raw = frame
-
-        gps = gps_provider.get_location()
-        if gps.lat is not None and gps.lon is not None:
-            gps_snapshot = {
-                "lat": gps.lat,
-                "lon": gps.lon,
-                "alt": gps.alt,
-                "timestamp": time.time(),
-                }
-
-        else:
-            gps_snapshot = {
+        gps_snapshot = {
                 "lat": 0.0,
                 "lon": 0.0,
                 "alt": 0.0,
                 "timestamp": time.time(),
                 }
-        cv2.putText(
-            frame,
-            f"Lat: {gps.lat:.6f} Lon: {gps.lon:.6f} Alt: {gps.alt:.1f}",
-            (10, 20),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2
-        )
+
+        gps = gps_provider.get_location()
+        lat = _gps_get(gps_snapshot, "lat")
+        lon = _gps_get(gps_snapshot, "lon")
+        alt = _gps_get(gps_snapshot, "alt")
+
+        lat_s = f"{lat:.6f}" if isinstance(lat, (int, float)) else "—"
+        lon_s = f"{lon:.6f}" if isinstance(lon, (int, float)) else "—"
+        alt_s = f"{alt:.1f}"  if isinstance(alt, (int, float))  else "—"
+
+        txt = f"Lat: {lat_s} Lon: {lon_s} Alt: {alt_s}"
+        cv2.putText(frame, txt, (10, H-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1, cv2.LINE_AA)
+
 
         with frame_lock:
             frame_buffer = {"image": frame, "gps": gps_snapshot}   
@@ -1209,22 +1224,23 @@ def pose_xgb_inference_thread(video=None, model=None):
 
     global livings_inference_thread, segmentation_inference_thread
     global start_thread
-    
 
+    last_t = 0.0 
     last_inec_time = time.time()
     pose_thread_started = True
+
+
+
+
 
 
     while not stop_pose_event.is_set():
         if not streaming:
             time.sleep(0.1)
-            pose_thread_started = False
             continue
         
         if not pose_thread_started:
-            time.sleep(0.02);
-            continue
-        
+            time.sleep(0.02); continue
         now = time.monotonic()
         if now - last_t < 1.0/POSE_FPS:
             time.sleep(0.001); continue
@@ -1344,9 +1360,7 @@ def classifier_thread():
 
     while True:
         if not pose_thread_started:
-            time.sleep(0.02);
-            continue
-        logging.debug("run classifier_thread")   
+            time.sleep(0.02); continue
         try:
             fpkt: FeatPacket = q_feat.get(timeout=0.3)
         except queue.Empty:
@@ -1519,7 +1533,6 @@ def set_right_stream():
             stop_detection_liv_event.set()
             stop_segmentation_event.set()
             stop_pose_event.set()
-            pose_thread_started=False
              #pornire thread
             if detection_thread is None or not detection_thread.is_alive():
                 stop_detection_event.clear()
@@ -1536,7 +1549,6 @@ def set_right_stream():
             stop_detection_event.set()
             stop_detection_liv_event.set()
             stop_pose_event.set()
-            pose_thread_started=False
             #pornire thread
             if segmnetation_thread is None or not segmnetation_thread.is_alive():
                 stop_segmentation_event.clear()
@@ -1553,7 +1565,6 @@ def set_right_stream():
             stop_detection_event.set()
             stop_segmentation_event.set()
             stop_pose_event.set()
-            pose_thread_started=False
             #pornire thread
             if detection_liv_thread is None or not detection_liv_thread.is_alive():
                 stop_detection_liv_event.clear()
@@ -1689,7 +1700,6 @@ def start_smart_mode():
 
     stop_detection_event.set()
     stop_pose_event.set()
-    pose_thread_started=False
 
     stop_detection_liv_event.clear()
     stop_segmentation_event.clear()
@@ -1769,12 +1779,6 @@ def status_broadcast_loop():
 
 start_thread(camera_thread, "CameraThread")
 start_thread(status_broadcast_loop, "StatusBroadcast")
-
-start_thread(normalizer_thread, "Normalizer")
-start_thread(feature_extractor_thread, "FeatExtractor")
-start_thread(classifier_thread, "Classifier")
-
-
 
 if __name__ == "__main__":
 
