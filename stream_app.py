@@ -889,6 +889,12 @@ def camera_thread():
 
         with raw_lock:
             latest_raw = frame
+        gps_snapshot = {
+                "lat": 0.0,
+                "lon": 0.0,
+                "alt": 0.0,
+                "timestamp": time.time(),
+                }
 
         gps = gps_provider.get_location()
         if gps.lat is not None and gps.lon is not None:
@@ -899,13 +905,8 @@ def camera_thread():
                 "timestamp": time.time(),
                 }
 
-        else:
-            gps_snapshot = {
-                "lat": 0.0,
-                "lon": 0.0,
-                "alt": 0.0,
-                "timestamp": time.time(),
-                }
+        
+           
         cv2.putText(
             frame,
             f"Lat: {gps_snapshot.lat:.6f} Lon: {gps_snapshot.lon:.6f} Alt: {gps_snapshot.alt:.1f}",
