@@ -908,7 +908,7 @@ def camera_thread():
                 }
         cv2.putText(
             frame,
-            f"Lat: {gps.lat:.6f} Lon: {gps.lon:.6f} Alt: {gps.alt:.1f}",
+            f"Lat: {gps_snapshot.lat:.6f} Lon: {gps_snapshot.lon:.6f} Alt: {gps_snapshot.alt:.1f}",
             (10, 20),
             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2
         )
