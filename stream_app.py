@@ -1061,7 +1061,6 @@ def yolo_function_thread():
 # În orice caz, trimite etichetele detectate prin WebSocket și le desenează în streamul `mar_feed`.
 
 def livings_inference_thread(video=None):
-
     global mar_output_frame, frame_buffer
     obiecte_detectate = []
 
@@ -1071,19 +1070,17 @@ def livings_inference_thread(video=None):
         model.fuse()
     except Exception:
         pass
-    #logging.info("Firul livings_inference_thread initmmmmmmmmm...model init")
 
     LIVINGS_IMG_SZ = 320   # sau 288
     LIVINGS_FPS    = 3.0
     last_t = 0.0
 
     while not stop_detection_liv_event.is_set():
-        
-       
         if not streaming:
             time.sleep(0.1)
             continue
-                # limitare FPS
+
+        # limitare FPS
         now = time.monotonic()
         if now - last_t < 1.0 / LIVINGS_FPS:
             time.sleep(0.005)
@@ -1091,19 +1088,18 @@ def livings_inference_thread(video=None):
         last_t = now
 
         obiecte_detectate.clear()
-            
+
+        # preluare frame
         with frame_lock:
             data = frame_buffer.copy() if frame_buffer is not None else None
         if data is None:
             time.sleep(0.01)
             continue
-            
-        frame = data["image"]
-        # asigură-te că e ndarray C-contiguous (evită surprize la loader)
-        frame = np.ascontiguousarray(frame)
-        annotated = frame.copy() 
-        gps_info = data["gps"]
-        
+
+        frame = np.ascontiguousarray(data["image"])
+        annotated = frame.copy()   # <-- IMPORTANT: mereu definit!
+
+        # inferență pe ndarray: stream=False
         try:
             results = model.predict(
                 source=frame,
@@ -1122,9 +1118,8 @@ def livings_inference_thread(video=None):
                 mar_output_frame = cv2.imencode('.jpg', annotated, encode_params)[1].tobytes()
             time.sleep(0.01)
             continue
-     
-        
-        
+
+        # results e listă; procesează primul element dacă există
         if results:
             r = results[0]
             if hasattr(r, "boxes") and r.boxes is not None:
@@ -1143,9 +1138,9 @@ def livings_inference_thread(video=None):
                     label = f"{name} {conf:.2f}"
                     cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 255), 2)
                     cv2.putText(annotated, label, (x1, y1 - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
+        # smart switch (dacă îl folosești)
         if smart_stream_mode and results:
             r = results[0]
             if hasattr(r, "boxes") and r.boxes is not None:
@@ -1162,14 +1157,13 @@ def livings_inference_thread(video=None):
                             pose_thread = start_thread(pose_xgb_inference_thread, "PoseXGBDetection")
                         return
 
-        socketio.emit("detection_update", {"obiecte": obiecte_detectate})    
-    
+        socketio.emit("detection_update", {"obiecte": obiecte_detectate})
+
         with mar_lock:
             encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY]
             mar_output_frame = cv2.imencode('.jpg', annotated, encode_params)[1].tobytes()
-            logging.info("Firul livings_inference_thread rulează..mar_output_frame.")
-        time.sleep(0.01)
 
+        time.sleep(0.01
 # Rulează modelul YOLOv11 de segmentare semantică pentru a colora zonele din apă pe baza adâncimii sau a curenților de rupere.
 # Suportă clase ca: „lvl_mic”, „lvl_mediu”, „lvl_adanc”, „rip_current”.
 # Fiecare mască este desenată peste imaginea originală și este transmisă prin streamul `seg_feed`.
