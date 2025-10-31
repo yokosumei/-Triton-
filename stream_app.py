@@ -1241,6 +1241,7 @@ def pose_xgb_inference_thread(video=None, model=None):
         
         if not pose_thread_started:
             time.sleep(0.02); continue
+        logger.debug("pose_thread_started="+pose_thread_started)
         now = time.monotonic()
         if now - last_t < 1.0/POSE_FPS:
             time.sleep(0.001); continue
@@ -1361,6 +1362,7 @@ def classifier_thread():
         feature_order = list(XGB.feature_names_in_)
 
     while True:
+          logger.debug("classifier_thread->run:"+pose_thread_started)
         if not pose_thread_started:
             time.sleep(0.02);
             continue
