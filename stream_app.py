@@ -1362,7 +1362,7 @@ def classifier_thread():
         feature_order = list(XGB.feature_names_in_)
 
     while True:
-        logger.debug("classifier_thread->run:"+pose_thread_started)
+        logger.debug("classifier_thread->run:%s",pose_thread_started)
         if not pose_thread_started:
             time.sleep(0.02);
             continue
