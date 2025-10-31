@@ -1362,11 +1362,11 @@ def classifier_thread():
         feature_order = list(XGB.feature_names_in_)
 
     while True:
-        logging.debug("classifier_thread->run:%s",pose_thread_started)
+       # logging.debug("classifier_thread->run:%s",pose_thread_started)
         if not pose_thread_started:
             time.sleep(0.02);
             continue
-        logging.debug("classifier_thread->run")
+        #logging.debug("classifier_thread->run")
         try:
             fpkt: FeatPacket = q_feat.get(timeout=0.3)
         except queue.Empty:
