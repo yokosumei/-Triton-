@@ -1143,7 +1143,7 @@ def livings_inference_thread(video=None):
                     label = f"{name} {conf:.2f}"
                     cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 255), 2)
                     cv2.putText(annotated, label, (x1, y1 - 10),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
         if smart_stream_mode and results:
