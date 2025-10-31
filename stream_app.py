@@ -1533,6 +1533,7 @@ def set_right_stream():
             stop_detection_liv_event.set()
             stop_segmentation_event.set()
             stop_pose_event.set()
+            pose_thread_started=False
              #pornire thread
             if detection_thread is None or not detection_thread.is_alive():
                 stop_detection_event.clear()
@@ -1549,6 +1550,7 @@ def set_right_stream():
             stop_detection_event.set()
             stop_detection_liv_event.set()
             stop_pose_event.set()
+            pose_thread_started=False
             #pornire thread
             if segmnetation_thread is None or not segmnetation_thread.is_alive():
                 stop_segmentation_event.clear()
@@ -1565,6 +1567,7 @@ def set_right_stream():
             stop_detection_event.set()
             stop_segmentation_event.set()
             stop_pose_event.set()
+            pose_thread_started=False
             #pornire thread
             if detection_liv_thread is None or not detection_liv_thread.is_alive():
                 stop_detection_liv_event.clear()
@@ -1587,6 +1590,7 @@ def set_right_stream():
             #repornire thread
             # if pose_thread and pose_thread.is_alive():
             #     stop_pose_event.set()
+        #  pose_thread_started=False
             #     pose_thread.join()  # așteaptă să se termine curentul thread
             #     stop_pose_event.clear()
             #     pose_thread =start_thread(pose_xgb_inference_thread, "PoseXGBDetection") 
@@ -1700,6 +1704,7 @@ def start_smart_mode():
 
     stop_detection_event.set()
     stop_pose_event.set()
+    pose_thread_started=False
 
     stop_detection_liv_event.clear()
     stop_segmentation_event.clear()
@@ -1779,6 +1784,10 @@ def status_broadcast_loop():
 
 start_thread(camera_thread, "CameraThread")
 start_thread(status_broadcast_loop, "StatusBroadcast")
+
+start_thread(normalizer_thread, "Normalizer")
+start_thread(feature_extractor_thread, "FeatExtractor")
+start_thread(classifier_thread, "Classifier")
 
 if __name__ == "__main__":
 
