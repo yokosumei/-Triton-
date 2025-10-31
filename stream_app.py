@@ -215,14 +215,6 @@ def _gps_get(s, key, default=None):
 
 
 
-
-        
-
-
-
-
-
-
 GPIO.setmode(GPIO.BOARD)
 GPIO.setup(11, GPIO.OUT)
 GPIO.setup(12, GPIO.OUT)
@@ -1076,7 +1068,7 @@ def livings_inference_thread(video=None):
     model = YOLO("models/livings.pt")
     logging.info("Firul livings_inference_thread initmmmmmmmmm...model init")
     while not stop_detection_liv_event.is_set():
-        logging.info("Firul livings_inference_thread rulează...")
+        
         obiecte_detectate.clear()
         if not streaming:
             time.sleep(0.1)
@@ -1085,13 +1077,15 @@ def livings_inference_thread(video=None):
         with frame_lock:
             data = frame_buffer.copy() if frame_buffer is not None else None
         if data is None:
+            logging.info("Firul livings_inference_thread rulează.. data is none.")
             time.sleep(0.05)
             continue
             
         frame = data["image"]
         gps_info = data["gps"]
         
-        results = model.predict(source=frame, conf=0.4, stream=True)
+        results = model.predict(source=data, conf=0.4, stream=True)
+        logging.info("Firul livings_inference_thread rulează.. data is none....dupa model.predict.")
         
         
         for r in results:
