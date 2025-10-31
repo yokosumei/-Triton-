@@ -1225,7 +1225,7 @@ def pose_xgb_inference_thread(video=None, model=None):
     global livings_inference_thread, segmentation_inference_thread
     global start_thread
 
-
+    last_t = 0.0 
     last_inec_time = time.time()
     pose_thread_started = True
 
