@@ -1064,27 +1064,55 @@ def livings_inference_thread(video=None):
 
     global mar_output_frame, frame_buffer
     obiecte_detectate = []
-    logging.info("Firul livings_inference_thread initmmmmmmmmm...")
+
+    logging.info("Firul livings_inference_thread rulează...")
     model = YOLO("models/livings.pt")
+    try:
+        model.fuse()
+    except Exception:
+        pass
     logging.info("Firul livings_inference_thread initmmmmmmmmm...model init")
+
+    LIVINGS_IMG_SZ = 320   # sau 288
+    LIVINGS_FPS    = 3.0
+    last_t = 0.0
+
     while not stop_detection_liv_event.is_set():
         
-        obiecte_detectate.clear()
+       
         if not streaming:
             time.sleep(0.1)
             continue
+                # limitare FPS
+        now = time.monotonic()
+        if now - last_t < 1.0 / LIVINGS_FPS:
+            time.sleep(0.005)
+            continue
+        last_t = now
+
+        obiecte_detectate.clear()
             
         with frame_lock:
             data = frame_buffer.copy() if frame_buffer is not None else None
         if data is None:
-            logging.info("Firul livings_inference_thread rulează.. data is none.")
-            time.sleep(0.05)
+            time.sleep(0.01)
             continue
             
         frame = data["image"]
+        # asigură-te că e ndarray C-contiguous (evită surprize la loader)
+        frame = np.ascontiguousarray(frame)
         gps_info = data["gps"]
         
-        results = model.predict(source=data, conf=0.4, stream=True)
+        #results = model.predict(source=data, conf=0.4, stream=True)
+        results = model.predict(
+            source=frame,
+            imgsz=LIVINGS_IMG_SZ,
+            conf=0.40,
+            device=DEVICE,
+            half=(DEVICE != "cpu"),
+            stream=False,
+            verbose=False
+        )
         logging.info("Firul livings_inference_thread rulează.. data is none....dupa model.predict.")
         
         
