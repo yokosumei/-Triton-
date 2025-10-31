@@ -48,6 +48,14 @@ try:
     cv2.setNumThreads(5)
 except Exception:
     pass
+import logging
+
+logging.basicConfig(
+    level=logging.DEBUG,  # <- era INFO
+    format='[%(levelname)s] (%(threadName)s) %(message)s'
+)
+# (opțional) dacă vrei și Flask/Werkzeug în DEBUG:
+logging.getLogger('werkzeug').setLevel(logging.DEBUG)
 
  
 # ========= Config =========
@@ -211,9 +219,6 @@ def _gps_get(s, key, default=None):
         
 
 
-logging.basicConfig(level=logging.INFO, format='[%(levelname)s] (%(threadName)s) %(message)s')
-log = logging.getLogger('werkzeug')
-log.setLevel(logging.DEBUG) 
 
 
 
