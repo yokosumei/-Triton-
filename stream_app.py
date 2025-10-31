@@ -1071,7 +1071,7 @@ def livings_inference_thread(video=None):
         model.fuse()
     except Exception:
         pass
-    logging.info("Firul livings_inference_thread initmmmmmmmmm...model init")
+    #logging.info("Firul livings_inference_thread initmmmmmmmmm...model init")
 
     LIVINGS_IMG_SZ = 320   # sau 288
     LIVINGS_FPS    = 3.0
@@ -1113,7 +1113,7 @@ def livings_inference_thread(video=None):
             stream=False,
             verbose=False
         )
-        logging.info("Firul livings_inference_thread rulează.. data is none....dupa model.predict.")
+     
         
         
         for r in results:
@@ -1158,6 +1158,7 @@ def livings_inference_thread(video=None):
         with mar_lock:
             encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY]
             mar_output_frame = cv2.imencode('.jpg', annotated, encode_params)[1].tobytes()
+            logging.info("Firul livings_inference_thread rulează..mar_output_frame.")
         time.sleep(0.01)
 
 # Rulează modelul YOLOv11 de segmentare semantică pentru a colora zonele din apă pe baza adâncimii sau a curenților de rupere.
@@ -1526,6 +1527,7 @@ def yolo_feed_snapshot():
 def mar_feed():
     def generate():
         while True:
+            logging.info(f"[FEED] mar_feed_..")
             with mar_lock:
                 frame = mar_output_frame or blank_jpeg()
             yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + frame + b"\r\n")
