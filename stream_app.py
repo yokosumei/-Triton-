@@ -1067,7 +1067,9 @@ def livings_inference_thread(video=None):
 
     global mar_output_frame, frame_buffer
     obiecte_detectate = []
+    logging.info("Firul livings_inference_thread initmmmmmmmmm...")
     model = YOLO("models/livings.pt")
+    logging.info("Firul livings_inference_thread initmmmmmmmmm...model init")
     while not stop_detection_liv_event.is_set():
         logging.info("Firul livings_inference_thread rulează...")
         obiecte_detectate.clear()
@@ -1574,6 +1576,7 @@ def set_right_stream():
             stop_segmentation_event.set()
             stop_pose_event.set()
             pose_thread_started=False
+            loging.debug("MMMMMMMMMAAAAAAARRRRRRRR")
             #pornire thread
             if detection_liv_thread is None or not detection_liv_thread.is_alive():
                 stop_detection_liv_event.clear()
