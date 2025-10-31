@@ -199,6 +199,10 @@ class FeatPacket:
 
 
 
+def _gps_get(s, key, default=None):
+    if isinstance(s, dict):
+        return s.get(key, default)
+    return getattr(s, key, default)
 
 
 
@@ -897,22 +901,17 @@ def camera_thread():
                 }
 
         gps = gps_provider.get_location()
-        if gps.lat is not None and gps.lon is not None:
-            gps_snapshot = {
-                "lat": gps.lat,
-                "lon": gps.lon,
-                "alt": gps.alt,
-                "timestamp": time.time(),
-                }
+        lat = _gps_get(gps_snapshot, "lat")
+        lon = _gps_get(gps_snapshot, "lon")
+        alt = _gps_get(gps_snapshot, "alt")
 
-        
-           
-        cv2.putText(
-            frame,
-            f"Lat: {gps_snapshot.lat:.6f} Lon: {gps_snapshot.lon:.6f} Alt: {gps_snapshot.alt:.1f}",
-            (10, 20),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2
-        )
+        lat_s = f"{lat:.6f}" if isinstance(lat, (int, float)) else "—"
+        lon_s = f"{lon:.6f}" if isinstance(lon, (int, float)) else "—"
+        alt_s = f"{alt:.1f}"  if isinstance(alt, (int, float))  else "—"
+
+        txt = f"Lat: {lat_s} Lon: {lon_s} Alt: {alt_s}"
+        cv2.putText(frame, txt, (10, H-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1, cv2.LINE_AA)
+
 
         with frame_lock:
             frame_buffer = {"image": frame, "gps": gps_snapshot}   
