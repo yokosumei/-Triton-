@@ -212,7 +212,7 @@ def _gps_get(s, key, default=None):
 
 
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] (%(threadName)s) %(message)s')
-log = logging.getloggin('werkzeug')
+log = logging.getlogger('werkzeug')
 log.setLevel(logging.DEBUG) 
 
 
