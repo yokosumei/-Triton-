@@ -1,4 +1,4 @@
- from matplotlib.pyplot import step
+from matplotlib.pyplot import step
 
 
 from werkzeug.utils import secure_filename
