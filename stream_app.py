@@ -1241,7 +1241,7 @@ def pose_xgb_inference_thread(video=None, model=None):
         
         if not pose_thread_started:
             time.sleep(0.02); continue
-        loggin.debug("pose_thread_started=%s",pose_thread_started)
+        logging.debug("pose_thread_started=%s",pose_thread_started)
         now = time.monotonic()
         if now - last_t < 1.0/POSE_FPS:
             time.sleep(0.001); continue
@@ -1362,11 +1362,11 @@ def classifier_thread():
         feature_order = list(XGB.feature_names_in_)
 
     while True:
-        loggin.debug("classifier_thread->run:%s",pose_thread_started)
+        logging.debug("classifier_thread->run:%s",pose_thread_started)
         if not pose_thread_started:
             time.sleep(0.02);
             continue
-        loggin.debug("classifier_thread->run")
+        logging.debug("classifier_thread->run")
         try:
             fpkt: FeatPacket = q_feat.get(timeout=0.3)
         except queue.Empty:
