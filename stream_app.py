@@ -1346,7 +1346,7 @@ def classifier_thread():
         if not pose_thread_started:
             time.sleep(0.02);
             continue
-         logging.debug("run classifier_thread")   
+        logging.debug("run classifier_thread")   
         try:
             fpkt: FeatPacket = q_feat.get(timeout=0.3)
         except queue.Empty:
