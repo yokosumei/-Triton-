@@ -1303,6 +1303,7 @@ def pose_xgb_inference_thread(video=None, model=None):
 
 
 def normalizer_thread():
+    global pose_thread_started
     while True:
         if not pose_thread_started:
             time.sleep(0.02); continue
@@ -1319,6 +1320,7 @@ def normalizer_thread():
             pass
 
 def feature_extractor_thread():
+    global pose_thread_started
     win = deque()
     next_eval_at = 0.0
     while True:
@@ -1352,7 +1354,7 @@ def feature_extractor_thread():
             pass
 
 def classifier_thread():
-    global last_label, last_proba, cooldown_until, consec_on, consec_off
+    global last_label, last_proba, cooldown_until, consec_on, consec_off,pose_thread_started
 
     feature_order = FEATURE_LIST
     if feature_order is None and hasattr(XGB, "feature_names_in_"):
