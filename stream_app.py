@@ -892,9 +892,9 @@ def camera_thread():
         with raw_lock:
             latest_raw = frame
         gps_snapshot = {
-                "lat": 0.0,
-                "lon": 0.0,
-                "alt": 0.0,
+                "lat": 47.6499,
+                "lon": 26.2490,
+                "alt": 1.4,
                 "timestamp": time.time(),
                 }
 
